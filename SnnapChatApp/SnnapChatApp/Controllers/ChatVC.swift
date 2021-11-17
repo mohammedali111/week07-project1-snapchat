@@ -4,7 +4,6 @@
 //
 //  Created by dmdm on 15/11/2021.
 //
-
 import UIKit
 import Firebase
 import FirebaseFirestore
@@ -12,8 +11,26 @@ import FirebaseFirestore
 class ChatVC: UIViewController {
     var user : User?
     var messages = [Message]()
+    var conversation: Conversations?
+    
     override func viewDidLoad() {
         super.viewDidLoad()
+        guard let curruntUserId = Auth.auth().currentUser?.uid else { return }
+        let users = conversation?.users ?? []
+        let otherUserId = users.first { id in
+            id != curruntUserId
+        } ?? ""
+    
+        
+        Firestore.firestore().collection("users").document(otherUserId).addSnapshotListener { doc, error in
+            guard let data = doc?.data() else { return }
+            let otherUser = User(id: data["id"] as! String, name: data["name"] as! String,
+                                 status: data["status"] as! String,
+                                 image: data["image"] as! String,
+                                 location: data["location"] as! String)
+            self.user = otherUser
+            self.title = otherUser.name
+        }
         setupUI()
         getAllMessages()
         chatTableView.register(UITableViewCell.self, forCellReuseIdentifier: "Cell")
@@ -44,6 +61,7 @@ class ChatVC: UIViewController {
         view.addSubview(chatTableView)
         view.addSubview(messageTextField)
         view.addSubview(sendButton)
+         sendButton.addTarget(self, action: #selector(sendMessage), for: .touchUpInside)
         NSLayoutConstraint.activate([
             chatTableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             chatTableView.leftAnchor.constraint(equalTo: view.leftAnchor),
@@ -64,22 +82,6 @@ extension ChatVC : UITableViewDelegate , UITableViewDataSource {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return messages.count
     }
-
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell =
-        chatTableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
-        let currentUserID = Auth.auth().currentUser?.uid
-        cell.textLabel?.text = messages[indexPath.row].content
-        print(messages[indexPath.row].content)
-        if messages[indexPath.row].sender == currentUserID {
-            cell.textLabel?.textAlignment = .right
-            cell.textLabel?.textColor = .blue
-        } else {
-            cell.textLabel?.textAlignment = .left
-            cell.textLabel?.textColor = .red
-        }
-        return cell
-    }
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         let deleteAction = UIContextualAction(
           style: .destructive,
@@ -89,79 +91,81 @@ extension ChatVC : UITableViewDelegate , UITableViewDataSource {
           }
         return UISwipeActionsConfiguration(actions: [deleteAction])
       }
-}
-extension ChatVC {
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell =
+        chatTableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
+        let currentUserID = Auth.auth().currentUser?.uid
+        let cellIdentifier = "cell"
+
+//        var image : UIImage = UIImage(named: "osx_design_view_messages")
+          
+        cell.textLabel?.text = messages[indexPath.row].content
+        print(messages[indexPath.row].content)
+        if messages[indexPath.row].senderId == currentUserID {
+            cell.textLabel?.textAlignment = .right
+            cell.textLabel?.textColor = .blue
+        } else {
+            cell.textLabel?.textAlignment = .left
+            cell.textLabel?.textColor = .red
+        }
+        return cell
+   
+    }
+    //extension ChatVC {
     @objc func sendMessage() {
         let messageId = UUID().uuidString
         guard let currentUserID = Auth.auth().currentUser?.uid else {return}
         guard let message = messageTextField.text else {return}
-        guard let user = user else {return}
+//        guard let user = user else {return}
+        
         Firestore.firestore().document("messages/\(messageId)").setData([
-            "sender" : currentUserID,
-            "receiver" : user.id,
+            "id" : UUID().uuidString,
+            "senderId" : currentUserID,
+            "senderName": "",
             "content" : message,
-            "id": messageId,
+            "timestamp":  Timestamp(),
+            "conversationsId" : conversation?.id
+            
         ])
         messageTextField.text = ""
     }
     func getAllMessages() {
-        guard let chatID = user?.id else {return}
-        guard let userID = Auth.auth().currentUser?.uid else {return}
-        self.messages.removeAll()
+//        guard let chatID = user?.id else {return} ..................
+        guard let conversationsId = conversation?.id else {return}
         //self.chatTableView.reloadData()
         // self.messages = []
         Firestore.firestore()
             .collection("messages")
-            .whereField("receiver", isEqualTo: userID)
-            .whereField("sender", isEqualTo: chatID)
+            .whereField("conversationsId", isEqualTo: conversationsId)
             .addSnapshotListener { snapshot, error in
                 //guard let userID = Auth.auth().currentUser?.uid else {return}
+                self.messages.removeAll()
+
                 if error == nil {
-                    for document in snapshot!.documents{
+                    for document in snapshot!.documents {
                         let data = document.data()
                         let newMsg = Message(
-                            content: data["content"] as? String,
-                            sender: data["sender"] as? String,
-                            reciever: data["receiver"] as? String,
-                            id: (data["id"] as? String) ?? "",
-                            timestamp: (data["timestamp"] as? Timestamp) ?? Timestamp()
+                            id: (data["id"] as! String),
+                            senderId: data["senderId"] as! String,
+                            senderName: data["senderName"] as! String,
+                            content: data["content"] as! String,
+                            timestamp: (data["timestamp"] as? Timestamp) ?? Timestamp(),
+                            conversationsId: data["conversationsId"] as! String
                         )
+                        
                         let isMsgAdded = self.messages.contains { msg in
                             return msg.id == newMsg.id
                         }
                         if !isMsgAdded {
+                            if newMsg.content.isEmpty {
+                                continue
+                            }
                             self.messages.append(newMsg)
                         }
                     }
                     self.chatTableView.reloadData()
                 }
                 //self.chatTableView.reloadData()
-            }
-        Firestore.firestore()
-            .collection("messages")
-            .whereField("sender", isEqualTo: userID)
-            .whereField("receiver", isEqualTo: chatID)
-            .addSnapshotListener { snapshot, error in
-                if error == nil {
-                    for document in snapshot!.documents{
-                        let data = document.data()
-                        let newMsg = Message(
-                            content: data["content"] as? String,
-                            sender: data["sender"] as? String,
-                            reciever: data["receiver"] as? String,
-                            id: (data["id"] as? String) ?? "",
-                            timestamp: (data["timestamp"] as? Timestamp) ?? Timestamp()
-                        )
-                        let isMsgAdded = self.messages.contains { msg in
-                            return msg.id == newMsg.id
-                        }
-                        if !isMsgAdded {
-                            self.messages.append(newMsg)
-                        }
-                        self.chatTableView.reloadData()
-                    }
-                }
-                // self.chatTableView.reloadData()
             }
     }
 }

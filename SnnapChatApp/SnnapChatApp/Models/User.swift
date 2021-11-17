@@ -9,7 +9,10 @@ import Foundation
 import Firebase
 
 struct User {
-    let name : String
-    let id : String
-    let status : String
+  let id: String
+  let name: String
+  let status : String
+  let image : String
+  let location : String
 }
+
